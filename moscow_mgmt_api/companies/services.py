@@ -6,7 +6,18 @@ from statistics import median
 from typing import Any, Iterable
 
 from django.db import models
-from django.db.models import Max, Prefetch, QuerySet
+from django.db.models import (
+    Case,
+    ExpressionWrapper,
+    F,
+    FloatField,
+    Max,
+    Prefetch,
+    QuerySet,
+    Value,
+    When,
+)
+from django.db.models.functions import Cast, Coalesce, Least
 
 from .models import ManagingCompany, ManagingCompanyYearStat
 
@@ -61,7 +72,110 @@ def stat_for_year(company: ManagingCompany, year: int | None) -> ManagingCompany
         return cached[0] if cached else None
     return company.year_stats.filter(year=year).first()
 
+def annotate_problem_index(queryset: QuerySet[ManagingCompany], year: int | None) -> QuerySet[ManagingCompany]:
+    if year is None:
+        return queryset
 
+    queryset = queryset.annotate(
+        houses_for_calc=Case(
+            When(year_stats__houses_quantity__gt=0, then=Cast(F('year_stats__houses_quantity'), FloatField())),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        area_for_calc=Case(
+            When(year_stats__houses_area__gt=0, then=Cast(F('year_stats__houses_area'), FloatField())),
+            When(year_stats__total_area__gt=0, then=Cast(F('year_stats__total_area'), FloatField())),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        total_events_for_calc=ExpressionWrapper(
+            Cast(Coalesce(F('year_stats__events_executed'), Value(0)), FloatField())
+            + Cast(Coalesce(F('year_stats__events_not_executed_in_time'), Value(0)), FloatField()),
+            output_field=FloatField(),
+        ),
+    ).annotate(
+        violations_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__violations_amount'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        prescriptions_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__issued_prescriptions'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        protocols_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__protocols_composed'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        cancelled_contracts_per_100_houses_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__cancelled_contracts_amount'), Value(0)), FloatField()) / F('houses_for_calc') * Value(100.0),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        fines_per_1000_m2_sort=Case(
+            When(
+                area_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__sum_of_fine'), Value(0)), FloatField()) * Value(1000.0) / F('area_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        overdue_events_rate_sort=Case(
+            When(
+                total_events_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('year_stats__events_not_executed_in_time'), Value(0)), FloatField()) / F('total_events_for_calc') * Value(100.0),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+    ).annotate(
+        problem_index_sort=Least(
+            Value(100.0),
+            ExpressionWrapper(
+                F('violations_per_house_sort') * Value(18.0)
+                + F('prescriptions_per_house_sort') * Value(14.0)
+                + F('protocols_per_house_sort') * Value(10.0)
+                + F('fines_per_1000_m2_sort') * Value(0.12)
+                + F('cancelled_contracts_per_100_houses_sort') * Value(0.6)
+                + F('overdue_events_rate_sort') * Value(0.3),
+                output_field=FloatField(),
+            ),
+        )
+    )
+
+    return queryset
 
 def prefetch_year_stats(year: int | None) -> Prefetch | None:
     if year is None:
@@ -221,20 +335,31 @@ def filter_company_queryset(queryset: QuerySet[ManagingCompany], params: dict[st
         queryset = queryset.filter(year_stats__year=year, year_stats__houses_area__lte=area_max)
 
     ordering = params.get('ordering')
-    ordering_map = {
-        'name': 'short_name',
-        '-name': '-short_name',
-        'final_rating': 'year_stats__final_rating',
-        '-final_rating': '-year_stats__final_rating',
-        'houses_quantity': 'year_stats__houses_quantity',
-        '-houses_quantity': '-year_stats__houses_quantity',
-        'houses_area': 'year_stats__houses_area',
-        '-houses_area': '-year_stats__houses_area',
-        'scores': 'year_stats__total_amount_of_scores',
-        '-scores': '-year_stats__total_amount_of_scores',
-    }
-    if ordering in ordering_map:
-        queryset = queryset.order_by(ordering_map[ordering], 'id')
+
+    if ordering == 'name':
+        queryset = queryset.order_by('short_name', 'id')
+    elif ordering == '-name':
+        queryset = queryset.order_by('-short_name', 'id')
+    elif ordering == 'final_rating':
+        queryset = queryset.order_by(F('year_stats__final_rating').asc(nulls_last=True), 'id')
+    elif ordering == '-final_rating':
+        queryset = queryset.order_by(F('year_stats__final_rating').desc(nulls_last=True), 'id')
+    elif ordering == 'houses_quantity':
+        queryset = queryset.order_by('year_stats__houses_quantity', 'id')
+    elif ordering == '-houses_quantity':
+        queryset = queryset.order_by('-year_stats__houses_quantity', 'id')
+    elif ordering == 'houses_area':
+        queryset = queryset.order_by('year_stats__houses_area', 'id')
+    elif ordering == '-houses_area':
+        queryset = queryset.order_by('-year_stats__houses_area', 'id')
+    elif ordering == 'scores':
+        queryset = queryset.order_by(F('year_stats__total_amount_of_scores').asc(nulls_last=True), 'id')
+    elif ordering == '-scores':
+        queryset = queryset.order_by(F('year_stats__total_amount_of_scores').desc(nulls_last=True), 'id')
+    elif ordering == 'problem_index':
+        queryset = annotate_problem_index(queryset, year).order_by('problem_index_sort', 'id')
+    elif ordering == '-problem_index':
+        queryset = annotate_problem_index(queryset, year).order_by('-problem_index_sort', 'id')
     else:
         queryset = queryset.order_by('short_name', 'id')
 

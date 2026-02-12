@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import os
 from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'change-me-in-production')
-DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = [host.strip() for host in os.getenv('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost').split(',') if host.strip()]
+SECRET_KEY = 'change-me-in-production'
+DEBUG = True
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+
+PROD_DB = True
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -57,16 +58,15 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 
-DB_ENGINE = os.getenv('DB_ENGINE', 'sqlite').lower()
-if DB_ENGINE == 'postgresql':
+if PROD_DB:
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.getenv('POSTGRES_DB', 'moscow_mgmt_api'),
-            'USER': os.getenv('POSTGRES_USER', 'postgres'),
-            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
-            'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
-            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': 'course_project_db',    
+            'USER': 'root',                
+            'PASSWORD': '',               
+            'HOST': '127.0.0.1',
+            'PORT': '3306',
         }
     }
 else:
@@ -101,7 +101,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.AllowAny',
     ),
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'DEFAULT_PAGINATION_CLASS': 'common.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 20,
 }
 
@@ -114,7 +114,10 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    origin.strip() for origin in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173').split(',') if origin.strip()
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
 ]
 
 CORS_ALLOW_CREDENTIALS = True

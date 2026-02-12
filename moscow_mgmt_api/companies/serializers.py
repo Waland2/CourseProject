@@ -38,6 +38,7 @@ class CompanyListSerializer(serializers.ModelSerializer):
     houses_area = serializers.SerializerMethodField()
     final_rating = serializers.SerializerMethodField()
     total_amount_of_scores = serializers.SerializerMethodField()
+    problem_index = serializers.SerializerMethodField()
     risk_level = serializers.SerializerMethodField()
 
     class Meta:
@@ -53,8 +54,15 @@ class CompanyListSerializer(serializers.ModelSerializer):
             'houses_area',
             'final_rating',
             'total_amount_of_scores',
+            'problem_index',
             'risk_level',
         )
+
+    def get_problem_index(self, obj: ManagingCompany) -> float | None:
+        stat = self._get_stat(obj)
+        if not stat:
+            return None
+        return compute_metrics(stat).problem_index
 
     def _get_stat(self, obj: ManagingCompany) -> ManagingCompanyYearStat | None:
         return stat_for_year(obj, self.context.get('year'))
@@ -252,7 +260,6 @@ class ComparisonRequestSerializer(serializers.Serializer):
 
 class ComparisonCompanySerializer(serializers.ModelSerializer):
     metrics = serializers.SerializerMethodField()
-    year = serializers.IntegerField(source='year')
     company_id = serializers.IntegerField(source='company.id')
     inn = serializers.CharField(source='company.inn')
     short_name = serializers.CharField(source='company.short_name')
