@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from companies.models import ManagingCompanyYearStat
-from companies.services import compute_metrics, resolve_year
+from companies.services import compute_metrics, get_service_rank, resolve_year
 
 
 class DistrictAnalyticsView(APIView):
@@ -62,7 +62,8 @@ class RankingAnalyticsView(APIView):
                 'full_name': stat.company.full_name,
                 'year': stat.year,
                 'adm_area': stat.adm_area,
-                'final_rating': stat.final_rating,
+                'final_rating': get_service_rank(stat),
+                'official_rating': stat.final_rating,
                 'total_amount_of_scores': float(stat.total_amount_of_scores or 0),
                 'problem_index': metrics.problem_index,
                 'violations_per_house': metrics.violations_per_house,
@@ -72,7 +73,8 @@ class RankingAnalyticsView(APIView):
             rows.append(row)
 
         allowed_metrics = {
-            'final_rating': {'reverse': True},
+            'final_rating': {'reverse': False},
+            'official_rating': {'reverse': False},
             'total_amount_of_scores': {'reverse': True},
             'problem_index': {'reverse': False},
             'violations_per_house': {'reverse': False},

@@ -28,6 +28,7 @@ from .services import (
     resolve_year,
     stat_for_year,
     summarize_against_peers,
+    get_service_rank
 )
 
 
@@ -73,14 +74,21 @@ class ManagingCompanyDetailView(generics.RetrieveAPIView):
     lookup_url_kwarg = 'id'
 
     def get_queryset(self):
-        requested_year = self.request.query_params.get('year')
-        year = resolve_year(int(requested_year) if requested_year else None)
-        return build_company_queryset(year).prefetch_related('year_stats')
+        return ManagingCompany.objects.prefetch_related('year_stats')
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
+
+        company = self.get_object()
         requested_year = self.request.query_params.get('year')
-        context['year'] = resolve_year(int(requested_year) if requested_year else None)
+
+        if requested_year:
+            year = int(requested_year)
+        else:
+            latest_stat = company.year_stats.order_by('-year').first()
+            year = latest_stat.year if latest_stat else None
+
+        context['year'] = year
         return context
 
 
@@ -194,8 +202,11 @@ class ComparisonView(APIView):
                 'value': best_metrics[metric_name],
             }
 
-        best_rating_stat = max(stats, key=lambda item: item.final_rating or 0)
-        worst_rating_stat = min(stats, key=lambda item: item.final_rating or 999999)
+        stats_with_service_rank = [(stat, get_service_rank(stat)) for stat in stats]
+        stats_with_service_rank = [(stat, rank) for stat, rank in stats_with_service_rank if rank is not None]
+
+        best_rating_stat, best_rating_value = min(stats_with_service_rank, key=lambda item: item[1]) if stats_with_service_rank else (None, None)
+        worst_rating_stat, worst_rating_value = max(stats_with_service_rank, key=lambda item: item[1]) if stats_with_service_rank else (None, None)
 
         return Response(
             {
@@ -205,13 +216,16 @@ class ComparisonView(APIView):
                 'best_final_rating': {
                     'company_id': best_rating_stat.company_id,
                     'company_name': best_rating_stat.company.short_name or best_rating_stat.company.full_name,
-                    'value': best_rating_stat.final_rating,
-                },
+                    'value': best_rating_value,
+                    'official_rating': best_rating_stat.final_rating,
+                } if best_rating_stat else None,
+
                 'lowest_final_rating': {
                     'company_id': worst_rating_stat.company_id,
                     'company_name': worst_rating_stat.company.short_name or worst_rating_stat.company.full_name,
-                    'value': worst_rating_stat.final_rating,
-                },
+                    'value': worst_rating_value,
+                    'official_rating': worst_rating_stat.final_rating,
+                } if worst_rating_stat else None,
             }
         )
 

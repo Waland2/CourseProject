@@ -4,25 +4,48 @@ from dataclasses import dataclass
 from decimal import Decimal
 from statistics import median
 from typing import Any, Iterable
+from functools import lru_cache
 
 from django.db import models
 from django.db.models import (
     Case,
+    CharField,
+    DecimalField,
     ExpressionWrapper,
     F,
     FloatField,
+    IntegerField,
     Max,
+    OuterRef,
     Prefetch,
     QuerySet,
+    Subquery,
     Value,
     When,
 )
+
 from django.db.models.functions import Cast, Coalesce, Least
 
 from .models import ManagingCompany, ManagingCompanyYearStat
 
 ZERO = Decimal('0')
+METRIC_LABELS = {
+    'violations_per_house': 'нарушения на один дом',
+    'fines_per_house': 'штрафы на один дом',
+    'fines_per_1000_m2': 'штрафы на 1000 кв. м',
+    'prescriptions_per_house': 'предписания на один дом',
+    'protocols_per_house': 'протоколы на один дом',
+    'overdue_events_rate': 'доля просроченных мероприятий',
+    'problem_index': 'индекс проблемности',
+}
 
+def metric_label(metric_name: str) -> str:
+    return METRIC_LABELS.get(metric_name, metric_name)
+
+
+def join_metric_labels(metric_names: list[str]) -> str:
+    labels = [metric_label(name) for name in metric_names]
+    return ', '.join(labels)
 
 @dataclass
 class MetricBundle:
@@ -31,8 +54,6 @@ class MetricBundle:
     fines_per_1000_m2: float
     prescriptions_per_house: float
     protocols_per_house: float
-    cancelled_contracts_per_100_houses: float
-    punished_violations_per_house: float
     overdue_events_rate: float
     problem_index: float
 
@@ -43,7 +64,28 @@ def decimal_to_float(value: Decimal | None) -> float | None:
         return None
     return float(value)
 
+@lru_cache(maxsize=32)
+def get_service_rank_map(year: int) -> dict[int, int]:
+    stats = list(
+        ManagingCompanyYearStat.objects.filter(year=year).select_related('company')
+    )
 
+    stats.sort(
+        key=lambda stat: (
+            compute_metrics(stat).problem_index,
+            -(stat.houses_quantity or 0),
+            stat.company.short_name or stat.company.full_name or '',
+            stat.company_id,
+        )
+    )
+
+    return {stat.id: index + 1 for index, stat in enumerate(stats)}
+
+
+def get_service_rank(stat: ManagingCompanyYearStat | None) -> int | None:
+    if not stat:
+        return None
+    return get_service_rank_map(stat.year).get(stat.id)
 
 def get_latest_year() -> int | None:
     rated_year = (
@@ -71,6 +113,145 @@ def stat_for_year(company: ManagingCompany, year: int | None) -> ManagingCompany
     if cached:
         return cached[0] if cached else None
     return company.year_stats.filter(year=year).first()
+
+def annotate_selected_stats(queryset: QuerySet[ManagingCompany], year: int | None) -> QuerySet[ManagingCompany]:
+    stats = ManagingCompanyYearStat.objects.filter(company_id=OuterRef('pk'))
+
+    if year is not None:
+        stats = stats.filter(year=year).order_by('-id')
+    else:
+        stats = stats.order_by('-year', '-id')
+
+    queryset = queryset.annotate(
+        selected_year=Subquery(stats.values('year')[:1], output_field=IntegerField()),
+        selected_adm_area=Subquery(stats.values('adm_area')[:1], output_field=CharField()),
+        selected_houses_quantity=Subquery(stats.values('houses_quantity')[:1], output_field=IntegerField()),
+        selected_houses_area=Subquery(stats.values('houses_area')[:1], output_field=IntegerField()),
+        selected_total_area=Subquery(stats.values('total_area')[:1], output_field=IntegerField()),
+        selected_final_rating=Subquery(stats.values('final_rating')[:1], output_field=IntegerField()),
+        selected_total_amount_of_scores=Subquery(
+            stats.values('total_amount_of_scores')[:1],
+            output_field=DecimalField(max_digits=8, decimal_places=2),
+        ),
+        selected_issued_prescriptions=Subquery(stats.values('issued_prescriptions')[:1], output_field=IntegerField()),
+        selected_violations_amount=Subquery(stats.values('violations_amount')[:1], output_field=IntegerField()),
+        selected_protocols_composed=Subquery(stats.values('protocols_composed')[:1], output_field=IntegerField()),
+        selected_cancelled_contracts_amount=Subquery(
+            stats.values('cancelled_contracts_amount')[:1],
+            output_field=IntegerField(),
+        ),
+        selected_events_executed=Subquery(stats.values('events_executed')[:1], output_field=IntegerField()),
+        selected_events_not_executed_in_time=Subquery(
+            stats.values('events_not_executed_in_time')[:1],
+            output_field=IntegerField(),
+        ),
+        selected_sum_of_fine=Subquery(
+            stats.values('sum_of_fine')[:1],
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        ),
+    ).filter(selected_year__isnull=False)
+
+    queryset = queryset.annotate(
+        houses_for_calc=Case(
+            When(selected_houses_quantity__gt=0, then=Cast(F('selected_houses_quantity'), FloatField())),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        area_for_calc=Case(
+            When(selected_houses_area__gt=0, then=Cast(F('selected_houses_area'), FloatField())),
+            When(selected_total_area__gt=0, then=Cast(F('selected_total_area'), FloatField())),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        total_events_for_calc=ExpressionWrapper(
+            Cast(Coalesce(F('selected_events_executed'), Value(0)), FloatField())
+            + Cast(Coalesce(F('selected_events_not_executed_in_time'), Value(0)), FloatField()),
+            output_field=FloatField(),
+        ),
+    ).annotate(
+        violations_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_violations_amount'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        prescriptions_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_issued_prescriptions'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        protocols_per_house_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_protocols_composed'), Value(0)), FloatField()) / F('houses_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        cancelled_contracts_per_100_houses_sort=Case(
+            When(
+                houses_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_cancelled_contracts_amount'), Value(0)), FloatField())
+                    / F('houses_for_calc') * Value(100.0),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        fines_per_1000_m2_sort=Case(
+            When(
+                area_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_sum_of_fine'), Value(0)), FloatField()) * Value(1000.0)
+                    / F('area_for_calc'),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+        overdue_events_rate_sort=Case(
+            When(
+                total_events_for_calc__gt=0,
+                then=ExpressionWrapper(
+                    Cast(Coalesce(F('selected_events_not_executed_in_time'), Value(0)), FloatField())
+                    / F('total_events_for_calc') * Value(100.0),
+                    output_field=FloatField(),
+                ),
+            ),
+            default=Value(0.0),
+            output_field=FloatField(),
+        ),
+    ).annotate(
+        problem_index_sort=ExpressionWrapper(
+            F('violations_per_house_sort') * Value(18.0)
+            + F('prescriptions_per_house_sort') * Value(14.0)
+            + F('protocols_per_house_sort') * Value(10.0)
+            + F('fines_per_1000_m2_sort') * Value(0.12)
+            + F('cancelled_contracts_per_100_houses_sort') * Value(0.6)
+            + F('overdue_events_rate_sort') * Value(0.3),
+            output_field=FloatField(),
+        )
+    )
+
+    return queryset
+
 
 def annotate_problem_index(queryset: QuerySet[ManagingCompany], year: int | None) -> QuerySet[ManagingCompany]:
     if year is None:
@@ -127,17 +308,6 @@ def annotate_problem_index(queryset: QuerySet[ManagingCompany], year: int | None
             default=Value(0.0),
             output_field=FloatField(),
         ),
-        cancelled_contracts_per_100_houses_sort=Case(
-            When(
-                houses_for_calc__gt=0,
-                then=ExpressionWrapper(
-                    Cast(Coalesce(F('year_stats__cancelled_contracts_amount'), Value(0)), FloatField()) / F('houses_for_calc') * Value(100.0),
-                    output_field=FloatField(),
-                ),
-            ),
-            default=Value(0.0),
-            output_field=FloatField(),
-        ),
         fines_per_1000_m2_sort=Case(
             When(
                 area_for_calc__gt=0,
@@ -161,21 +331,18 @@ def annotate_problem_index(queryset: QuerySet[ManagingCompany], year: int | None
             output_field=FloatField(),
         ),
     ).annotate(
-        problem_index_sort=Least(
-            Value(100.0),
-            ExpressionWrapper(
-                F('violations_per_house_sort') * Value(18.0)
-                + F('prescriptions_per_house_sort') * Value(14.0)
-                + F('protocols_per_house_sort') * Value(10.0)
-                + F('fines_per_1000_m2_sort') * Value(0.12)
-                + F('cancelled_contracts_per_100_houses_sort') * Value(0.6)
-                + F('overdue_events_rate_sort') * Value(0.3),
-                output_field=FloatField(),
-            ),
+        problem_index_sort=ExpressionWrapper(
+            F('violations_per_house_sort') * Value(18.0)
+            + F('prescriptions_per_house_sort') * Value(14.0)
+            + F('protocols_per_house_sort') * Value(10.0)
+            + F('fines_per_1000_m2_sort') * Value(0.12)
+            + F('overdue_events_rate_sort') * Value(0.3),
+            output_field=FloatField(),
         )
     )
 
     return queryset
+
 
 def prefetch_year_stats(year: int | None) -> Prefetch | None:
     if year is None:
@@ -185,7 +352,6 @@ def prefetch_year_stats(year: int | None) -> Prefetch | None:
         queryset=ManagingCompanyYearStat.objects.filter(year=year).select_related('company'),
         to_attr='selected_year_stats',
     )
-
 
 
 def safe_div(numerator: float | Decimal | int, denominator: float | Decimal | int) -> float:
@@ -206,21 +372,15 @@ def compute_metrics(stat: ManagingCompanyYearStat) -> MetricBundle:
     fines_per_1000_m2 = safe_div(stat.sum_of_fine, (area / 1000) if area else 0)
     prescriptions_per_house = safe_div(stat.issued_prescriptions, houses)
     protocols_per_house = safe_div(stat.protocols_composed, houses)
-    cancelled_contracts_per_100_houses = round(safe_div(stat.cancelled_contracts_amount, houses) * 100, 4) if houses else 0.0
-    punished_violations_per_house = safe_div(stat.violations_punished, houses)
     overdue_events_rate = round(safe_div(stat.events_not_executed_in_time, total_events) * 100, 4) if total_events else 0.0
 
-    problem_index = min(
-        100.0,
-        round(
-            violations_per_house * 18
-            + prescriptions_per_house * 14
-            + protocols_per_house * 10
-            + fines_per_1000_m2 * 0.12
-            + cancelled_contracts_per_100_houses * 0.6
-            + overdue_events_rate * 0.3,
-            2,
-        ),
+    problem_index = round(
+        violations_per_house * 18
+        + prescriptions_per_house * 14
+        + protocols_per_house * 10
+        + fines_per_1000_m2 * 0.12
+        + overdue_events_rate * 0.3,
+        2,
     )
 
     return MetricBundle(
@@ -229,12 +389,9 @@ def compute_metrics(stat: ManagingCompanyYearStat) -> MetricBundle:
         fines_per_1000_m2=fines_per_1000_m2,
         prescriptions_per_house=prescriptions_per_house,
         protocols_per_house=protocols_per_house,
-        cancelled_contracts_per_100_houses=cancelled_contracts_per_100_houses,
-        punished_violations_per_house=punished_violations_per_house,
         overdue_events_rate=overdue_events_rate,
         problem_index=problem_index,
     )
-
 
 
 def compute_stability_index(history: list[ManagingCompanyYearStat]) -> float:
@@ -298,17 +455,17 @@ def filter_company_queryset(queryset: QuerySet[ManagingCompany], params: dict[st
     if adm_area:
         queryset = queryset.filter(year_stats__year=year, year_stats__adm_area=adm_area)
 
-    final_rating = params.get('final_rating')
-    if final_rating not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating=int(final_rating))
+    official_rating = params.get('official_rating')
+    if official_rating not in (None, ''):
+        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating=int(official_rating))
 
-    final_rating_min = params.get('final_rating_min')
-    if final_rating_min not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating__gte=int(final_rating_min))
+    official_rating_min = params.get('official_rating_min')
+    if official_rating_min not in (None, ''):
+        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating__gte=int(official_rating_min))
 
-    final_rating_max = params.get('final_rating_max')
-    if final_rating_max not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating__lte=int(final_rating_max))
+    official_rating_max = params.get('official_rating_max')
+    if official_rating_max not in (None, ''):
+        queryset = queryset.filter(year_stats__year=year, year_stats__final_rating__lte=int(official_rating_max))
 
     scores_min = params.get('scores_min')
     if scores_min not in (None, ''):
@@ -320,51 +477,73 @@ def filter_company_queryset(queryset: QuerySet[ManagingCompany], params: dict[st
 
     houses_min = params.get('houses_min')
     if houses_min not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__houses_quantity__gte=houses_min)
+        queryset = queryset.filter(year_stats__year=year, year_stats__houses_quantity__gte=int(houses_min))
 
     houses_max = params.get('houses_max')
     if houses_max not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__houses_quantity__lte=houses_max)
+        queryset = queryset.filter(year_stats__year=year, year_stats__houses_quantity__lte=int(houses_max))
 
     area_min = params.get('area_min')
     if area_min not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__houses_area__gte=area_min)
+        queryset = queryset.filter(year_stats__year=year, year_stats__houses_area__gte=int(area_min))
 
     area_max = params.get('area_max')
     if area_max not in (None, ''):
-        queryset = queryset.filter(year_stats__year=year, year_stats__houses_area__lte=area_max)
+        queryset = queryset.filter(year_stats__year=year, year_stats__houses_area__lte=int(area_max))
 
     ordering = params.get('ordering')
+
+    if ordering == 'final_rating':
+        ordering = 'problem_index'
+    elif ordering == '-final_rating':
+        ordering = '-problem_index'
+    elif ordering == 'official_rating':
+        ordering = 'db_final_rating'
+    elif ordering == '-official_rating':
+        ordering = '-db_final_rating'
 
     if ordering == 'name':
         queryset = queryset.order_by('short_name', 'id')
     elif ordering == '-name':
         queryset = queryset.order_by('-short_name', 'id')
-    elif ordering == 'final_rating':
+
+    elif ordering == 'db_final_rating':
         queryset = queryset.order_by(F('year_stats__final_rating').asc(nulls_last=True), 'id')
-    elif ordering == '-final_rating':
+    elif ordering == '-db_final_rating':
         queryset = queryset.order_by(F('year_stats__final_rating').desc(nulls_last=True), 'id')
+
     elif ordering == 'houses_quantity':
-        queryset = queryset.order_by('year_stats__houses_quantity', 'id')
+        queryset = queryset.order_by(F('year_stats__houses_quantity').asc(nulls_last=True), 'id')
     elif ordering == '-houses_quantity':
-        queryset = queryset.order_by('-year_stats__houses_quantity', 'id')
+        queryset = queryset.order_by(F('year_stats__houses_quantity').desc(nulls_last=True), 'id')
+
     elif ordering == 'houses_area':
-        queryset = queryset.order_by('year_stats__houses_area', 'id')
+        queryset = queryset.order_by(F('year_stats__houses_area').asc(nulls_last=True), 'id')
     elif ordering == '-houses_area':
-        queryset = queryset.order_by('-year_stats__houses_area', 'id')
+        queryset = queryset.order_by(F('year_stats__houses_area').desc(nulls_last=True), 'id')
+
     elif ordering == 'scores':
         queryset = queryset.order_by(F('year_stats__total_amount_of_scores').asc(nulls_last=True), 'id')
     elif ordering == '-scores':
         queryset = queryset.order_by(F('year_stats__total_amount_of_scores').desc(nulls_last=True), 'id')
+
     elif ordering == 'problem_index':
-        queryset = annotate_problem_index(queryset, year).order_by('problem_index_sort', 'id')
+        queryset = annotate_problem_index(queryset, year).order_by(
+            'problem_index_sort',
+            F('year_stats__houses_quantity').desc(nulls_last=True),
+            'id',
+        )
     elif ordering == '-problem_index':
-        queryset = annotate_problem_index(queryset, year).order_by('-problem_index_sort', 'id')
+        queryset = annotate_problem_index(queryset, year).order_by(
+            '-problem_index_sort',
+            F('year_stats__houses_quantity').desc(nulls_last=True),
+            'id',
+        )
+
     else:
         queryset = queryset.order_by('short_name', 'id')
 
     return queryset
-
 
 
 def get_similar_stats(stat: ManagingCompanyYearStat, limit: int = 5) -> list[ManagingCompanyYearStat]:
@@ -431,13 +610,21 @@ def summarize_against_peers(target_stat: ManagingCompanyYearStat, peers: Iterabl
         base = avg_value if avg_value else 1
         deviation_pct[name] = round(((getattr(target_metrics, name) - avg_value) / base) * 100, 2)
 
-    worse_metrics = [name for name, value in deviation_pct.items() if value > 15 and name != 'punished_violations_per_house']
-    better_metrics = [name for name, value in deviation_pct.items() if value < -15 and name != 'punished_violations_per_house']
+    worse_metrics = [name for name, value in deviation_pct.items() if value > 15]
+    better_metrics = [name for name, value in deviation_pct.items() if value < -15]
 
     if worse_metrics:
-        summary = 'Организация уступает средней по сопоставимой группе по следующим метрикам: ' + ', '.join(worse_metrics[:3]) + '.'
+        summary = (
+            'Организация выглядит хуже средней по сопоставимой группе по следующим показателям: '
+            + join_metric_labels(worse_metrics[:3])
+            + '.'
+        )
     elif better_metrics:
-        summary = 'Организация выглядит лучше средней по сопоставимой группе по следующим метрикам: ' + ', '.join(better_metrics[:3]) + '.'
+        summary = (
+            'Организация выглядит лучше средней по сопоставимой группе по следующим показателям: '
+            + join_metric_labels(better_metrics[:3])
+            + '.'
+        )
     else:
         summary = 'Организация находится близко к среднему уровню сопоставимой группы.'
 
@@ -450,7 +637,6 @@ def summarize_against_peers(target_stat: ManagingCompanyYearStat, peers: Iterabl
     }
 
 
-
 def build_insights(target_stat: ManagingCompanyYearStat, history: list[ManagingCompanyYearStat], peers: list[ManagingCompanyYearStat]) -> dict[str, Any]:
     metrics = compute_metrics(target_stat)
     benchmark = summarize_against_peers(target_stat, peers)
@@ -458,10 +644,16 @@ def build_insights(target_stat: ManagingCompanyYearStat, history: list[ManagingC
     strengths: list[str] = []
     weaknesses: list[str] = []
 
+    risk_text_map = {
+        'low': 'низкий',
+        'medium': 'средний',
+        'high': 'высокий',
+    }
+
     if metrics.problem_index >= 50:
-        signals.append('Высокий интегральный индекс проблемности организации.')
+        signals.append('Зафиксирован высокий индекс проблемности организации.')
     elif metrics.problem_index >= 20:
-        signals.append('Обнаружен средний уровень проблемности организации.')
+        signals.append('Зафиксирован средний индекс проблемности организации.')
 
     if benchmark.get('deviation_pct', {}).get('violations_per_house', 0) > 15:
         signals.append('Число нарушений на один дом выше среднего по сопоставимой группе.')
@@ -470,22 +662,28 @@ def build_insights(target_stat: ManagingCompanyYearStat, history: list[ManagingC
         strengths.append('Уровень нарушений не превышает средний по сопоставимой группе.')
 
     if benchmark.get('deviation_pct', {}).get('fines_per_1000_m2', 0) > 15:
-        signals.append('Сумма штрафов на 1000 кв. м выше среднего по сопоставимой группе.')
+        signals.append('Штрафная нагрузка на 1000 кв. м выше средней по сопоставимой группе.')
         weaknesses.append('Повышенная интенсивность штрафов.')
     else:
         strengths.append('Штрафная нагрузка не превышает среднюю по сопоставимой группе.')
+
+    if benchmark.get('deviation_pct', {}).get('prescriptions_per_house', 0) > 15:
+        weaknesses.append('Число предписаний на один дом выше среднего по сопоставимой группе.')
+
+    if benchmark.get('deviation_pct', {}).get('protocols_per_house', 0) > 15:
+        weaknesses.append('Число протоколов на один дом выше среднего по сопоставимой группе.')
+
+    if benchmark.get('deviation_pct', {}).get('overdue_events_rate', 0) > 15:
+        weaknesses.append('Доля просроченных мероприятий выше средней по сопоставимой группе.')
 
     if len(history) >= 2:
         previous = history[-2]
         previous_metrics = compute_metrics(previous)
         if metrics.problem_index - previous_metrics.problem_index > 10:
-            signals.append(f'За {target_stat.year} год наблюдается ухудшение интегральных показателей относительно {previous.year} года.')
-            weaknesses.append('Негативная динамика в последнем доступном периоде.')
+            signals.append(f'В {target_stat.year} году показатели ухудшились по сравнению с {previous.year} годом.')
+            weaknesses.append('Наблюдается негативная динамика по сравнению с предыдущим годом.')
         elif previous_metrics.problem_index - metrics.problem_index > 10:
             strengths.append('В последнем доступном периоде показатели улучшились.')
-
-        if previous.final_rating is not None and target_stat.final_rating is not None and target_stat.final_rating > previous.final_rating:
-            signals.append('Итоговый рейтинг стал хуже по сравнению с предыдущим годом.')
 
     stability = compute_stability_index(history)
     if stability >= 75:
@@ -493,8 +691,10 @@ def build_insights(target_stat: ManagingCompanyYearStat, history: list[ManagingC
     elif stability < 50:
         weaknesses.append('Показатели организации заметно колеблются по годам.')
 
+    risk_text = risk_text_map.get(risk_level(metrics.problem_index), risk_level(metrics.problem_index))
+
     summary_parts = [
-        f"Организация имеет {risk_level(metrics.problem_index)} уровень риска.",
+        f'Организация имеет {risk_text} уровень риска.',
         benchmark['summary'],
     ]
     if weaknesses:

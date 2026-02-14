@@ -23,7 +23,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'companies',
     'analytics_api',
-    'users',
 ]
 
 MIDDLEWARE = [
@@ -62,9 +61,9 @@ if PROD_DB:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
-            'NAME': 'course_project_db',    
-            'USER': 'root',                
-            'PASSWORD': '',               
+            'NAME': 'course_project_db_3',
+            'USER': 'root',
+            'PASSWORD': '',
             'HOST': '127.0.0.1',
             'PORT': '3306',
         }

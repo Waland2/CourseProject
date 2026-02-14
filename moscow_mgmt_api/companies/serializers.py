@@ -3,8 +3,14 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from .models import ManagingCompany, ManagingCompanyYearStat
-from .services import build_insights, compute_metrics, compute_stability_index, risk_level, stat_for_year
-
+from .services import (
+    build_insights,
+    compute_metrics,
+    compute_stability_index,
+    get_service_rank,
+    risk_level,
+    stat_for_year,
+)
 
 class MetricBundleSerializer(serializers.Serializer):
     violations_per_house = serializers.FloatField()
@@ -12,8 +18,6 @@ class MetricBundleSerializer(serializers.Serializer):
     fines_per_1000_m2 = serializers.FloatField()
     prescriptions_per_house = serializers.FloatField()
     protocols_per_house = serializers.FloatField()
-    cancelled_contracts_per_100_houses = serializers.FloatField()
-    punished_violations_per_house = serializers.FloatField()
     overdue_events_rate = serializers.FloatField()
     problem_index = serializers.FloatField()
 
@@ -37,9 +41,10 @@ class CompanyListSerializer(serializers.ModelSerializer):
     houses_quantity = serializers.SerializerMethodField()
     houses_area = serializers.SerializerMethodField()
     final_rating = serializers.SerializerMethodField()
+    official_rating = serializers.SerializerMethodField()
     total_amount_of_scores = serializers.SerializerMethodField()
-    problem_index = serializers.SerializerMethodField()
     risk_level = serializers.SerializerMethodField()
+    problem_index = serializers.SerializerMethodField()
 
     class Meta:
         model = ManagingCompany
@@ -53,16 +58,11 @@ class CompanyListSerializer(serializers.ModelSerializer):
             'houses_quantity',
             'houses_area',
             'final_rating',
+            'official_rating',
             'total_amount_of_scores',
             'problem_index',
             'risk_level',
         )
-
-    def get_problem_index(self, obj: ManagingCompany) -> float | None:
-        stat = self._get_stat(obj)
-        if not stat:
-            return None
-        return compute_metrics(stat).problem_index
 
     def _get_stat(self, obj: ManagingCompany) -> ManagingCompanyYearStat | None:
         return stat_for_year(obj, self.context.get('year'))
@@ -85,11 +85,19 @@ class CompanyListSerializer(serializers.ModelSerializer):
 
     def get_final_rating(self, obj: ManagingCompany) -> int | None:
         stat = self._get_stat(obj)
+        return get_service_rank(stat)
+
+    def get_official_rating(self, obj: ManagingCompany) -> int | None:
+        stat = self._get_stat(obj)
         return stat.final_rating if stat else None
 
     def get_total_amount_of_scores(self, obj: ManagingCompany) -> float | None:
         stat = self._get_stat(obj)
         return float(stat.total_amount_of_scores) if stat and stat.total_amount_of_scores is not None else None
+
+    def get_problem_index(self, obj: ManagingCompany) -> float | None:
+        stat = self._get_stat(obj)
+        return compute_metrics(stat).problem_index if stat else None
 
     def get_risk_level(self, obj: ManagingCompany) -> str | None:
         stat = self._get_stat(obj)
@@ -99,6 +107,8 @@ class CompanyListSerializer(serializers.ModelSerializer):
 
 
 class CompanyYearStatHistorySerializer(serializers.ModelSerializer):
+    final_rating = serializers.SerializerMethodField()
+    official_rating = serializers.SerializerMethodField()
     metrics = serializers.SerializerMethodField()
 
     class Meta:
@@ -109,6 +119,7 @@ class CompanyYearStatHistorySerializer(serializers.ModelSerializer):
             'houses_quantity',
             'houses_area',
             'final_rating',
+            'official_rating',
             'total_amount_of_scores',
             'issued_prescriptions',
             'violations_amount',
@@ -121,6 +132,12 @@ class CompanyYearStatHistorySerializer(serializers.ModelSerializer):
             'violations_punished',
             'metrics',
         )
+
+    def get_final_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return get_service_rank(obj)
+
+    def get_official_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return obj.final_rating
 
     def get_metrics(self, obj: ManagingCompanyYearStat) -> dict:
         return compute_metrics(obj).__dict__
@@ -174,7 +191,8 @@ class CompanyDetailSerializer(serializers.ModelSerializer):
             'houses_quantity': stat.houses_quantity,
             'houses_area': stat.houses_area,
             'total_area': stat.total_area,
-            'final_rating': stat.final_rating,
+            'final_rating': get_service_rank(stat),
+            'official_rating': stat.final_rating,
             'total_amount_of_scores': float(stat.total_amount_of_scores) if stat.total_amount_of_scores is not None else None,
             'public_satisfaction': {
                 'scores_sum': float(stat.public_satisfaction_scores_sum) if stat.public_satisfaction_scores_sum is not None else None,
@@ -227,6 +245,8 @@ class SimilarCompanySerializer(serializers.ModelSerializer):
     inn = serializers.CharField(source='company.inn', read_only=True)
     short_name = serializers.CharField(source='company.short_name', read_only=True)
     full_name = serializers.CharField(source='company.full_name', read_only=True)
+    final_rating = serializers.SerializerMethodField()
+    official_rating = serializers.SerializerMethodField()
     metrics = serializers.SerializerMethodField()
 
     class Meta:
@@ -241,9 +261,16 @@ class SimilarCompanySerializer(serializers.ModelSerializer):
             'houses_quantity',
             'houses_area',
             'final_rating',
+            'official_rating',
             'similarity_score',
             'metrics',
         )
+
+    def get_final_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return get_service_rank(obj)
+
+    def get_official_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return obj.final_rating
 
     def get_metrics(self, obj: ManagingCompanyYearStat) -> dict:
         return compute_metrics(obj).__dict__
@@ -264,6 +291,8 @@ class ComparisonCompanySerializer(serializers.ModelSerializer):
     inn = serializers.CharField(source='company.inn')
     short_name = serializers.CharField(source='company.short_name')
     full_name = serializers.CharField(source='company.full_name')
+    final_rating = serializers.SerializerMethodField()
+    official_rating = serializers.SerializerMethodField()
 
     class Meta:
         model = ManagingCompanyYearStat
@@ -277,6 +306,7 @@ class ComparisonCompanySerializer(serializers.ModelSerializer):
             'houses_quantity',
             'houses_area',
             'final_rating',
+            'official_rating',
             'total_amount_of_scores',
             'issued_prescriptions',
             'violations_amount',
@@ -286,6 +316,12 @@ class ComparisonCompanySerializer(serializers.ModelSerializer):
             'violations_punished',
             'metrics',
         )
+
+    def get_final_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return get_service_rank(obj)
+
+    def get_official_rating(self, obj: ManagingCompanyYearStat) -> int | None:
+        return obj.final_rating
 
     def get_metrics(self, obj: ManagingCompanyYearStat) -> dict:
         return compute_metrics(obj).__dict__
