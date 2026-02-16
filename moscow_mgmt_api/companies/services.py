@@ -64,6 +64,22 @@ def decimal_to_float(value: Decimal | None) -> float | None:
         return None
     return float(value)
 
+# @lru_cache(maxsize=32)
+# def get_service_rank_map(year: int) -> dict[int, int]:
+#     stats = list(
+#         ManagingCompanyYearStat.objects.filter(year=year).select_related('company')
+#     )
+
+#     stats.sort(
+#         key=lambda stat: (
+#             compute_metrics(stat).problem_index,
+#             -(stat.houses_quantity or 0),
+#             stat.company.short_name or stat.company.full_name or '',
+#             stat.company_id,
+#         )
+#     )
+
+#     return {stat.id: index + 1 for index, stat in enumerate(stats)}
 @lru_cache(maxsize=32)
 def get_service_rank_map(year: int) -> dict[int, int]:
     stats = list(
@@ -79,7 +95,20 @@ def get_service_rank_map(year: int) -> dict[int, int]:
         )
     )
 
-    return {stat.id: index + 1 for index, stat in enumerate(stats)}
+    rank_map: dict[int, int] = {}
+    current_rank = 0
+    previous_problem_index = None
+
+    for stat in stats:
+        current_problem_index = compute_metrics(stat).problem_index
+
+        if previous_problem_index is None or current_problem_index != previous_problem_index:
+            current_rank += 1
+
+        rank_map[stat.id] = current_rank
+        previous_problem_index = current_problem_index
+
+    return rank_map
 
 
 def get_service_rank(stat: ManagingCompanyYearStat | None) -> int | None:
@@ -133,14 +162,26 @@ def annotate_selected_stats(queryset: QuerySet[ManagingCompany], year: int | Non
             stats.values('total_amount_of_scores')[:1],
             output_field=DecimalField(max_digits=8, decimal_places=2),
         ),
-        selected_issued_prescriptions=Subquery(stats.values('issued_prescriptions')[:1], output_field=IntegerField()),
-        selected_violations_amount=Subquery(stats.values('violations_amount')[:1], output_field=IntegerField()),
-        selected_protocols_composed=Subquery(stats.values('protocols_composed')[:1], output_field=IntegerField()),
+        selected_issued_prescriptions=Subquery(
+            stats.values('issued_prescriptions')[:1],
+            output_field=IntegerField(),
+        ),
+        selected_violations_amount=Subquery(
+            stats.values('violations_amount')[:1],
+            output_field=IntegerField(),
+        ),
+        selected_protocols_composed=Subquery(
+            stats.values('protocols_composed')[:1],
+            output_field=IntegerField(),
+        ),
         selected_cancelled_contracts_amount=Subquery(
             stats.values('cancelled_contracts_amount')[:1],
             output_field=IntegerField(),
         ),
-        selected_events_executed=Subquery(stats.values('events_executed')[:1], output_field=IntegerField()),
+        selected_events_executed=Subquery(
+            stats.values('events_executed')[:1],
+            output_field=IntegerField(),
+        ),
         selected_events_not_executed_in_time=Subquery(
             stats.values('events_not_executed_in_time')[:1],
             output_field=IntegerField(),
@@ -202,18 +243,6 @@ def annotate_selected_stats(queryset: QuerySet[ManagingCompany], year: int | Non
             default=Value(0.0),
             output_field=FloatField(),
         ),
-        cancelled_contracts_per_100_houses_sort=Case(
-            When(
-                houses_for_calc__gt=0,
-                then=ExpressionWrapper(
-                    Cast(Coalesce(F('selected_cancelled_contracts_amount'), Value(0)), FloatField())
-                    / F('houses_for_calc') * Value(100.0),
-                    output_field=FloatField(),
-                ),
-            ),
-            default=Value(0.0),
-            output_field=FloatField(),
-        ),
         fines_per_1000_m2_sort=Case(
             When(
                 area_for_calc__gt=0,
@@ -244,7 +273,6 @@ def annotate_selected_stats(queryset: QuerySet[ManagingCompany], year: int | Non
             + F('prescriptions_per_house_sort') * Value(14.0)
             + F('protocols_per_house_sort') * Value(10.0)
             + F('fines_per_1000_m2_sort') * Value(0.12)
-            + F('cancelled_contracts_per_100_houses_sort') * Value(0.6)
             + F('overdue_events_rate_sort') * Value(0.3),
             output_field=FloatField(),
         )

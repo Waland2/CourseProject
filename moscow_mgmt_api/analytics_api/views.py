@@ -27,7 +27,10 @@ class DistrictAnalyticsView(APIView):
                 {
                     'adm_area': adm_area,
                     'companies_count': len(items),
-                    'avg_final_rating': round(sum((item.final_rating or 0) for item in items) / len(items), 2),
+                    'avg_final_rating': round(
+                        sum((get_service_rank(item) or 0) for item in items) / len(items),
+                        2
+                    ),
                     'avg_total_amount_of_scores': round(sum(float(item.total_amount_of_scores or 0) for item in items) / len(items), 2),
                     'avg_violations_amount': round(sum(item.violations_amount for item in items) / len(items), 2),
                     'avg_sum_of_fine': round(sum(float(item.sum_of_fine) for item in items) / len(items), 2),

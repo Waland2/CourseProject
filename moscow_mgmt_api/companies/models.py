@@ -23,15 +23,15 @@ class ManagingCompany(models.Model):
 
 class ManagingCompanyYearStat(models.Model):
     company = models.ForeignKey(ManagingCompany, related_name='year_stats', on_delete=models.CASCADE)
-    year = models.PositiveIntegerField(db_index=True)
-    adm_area = models.CharField(max_length=255, blank=True, db_index=True)
+    year = models.PositiveIntegerField()
+    adm_area = models.CharField(max_length=255, blank=True)
     adm_areas = models.JSONField(default=list, blank=True)
 
     houses_quantity = models.PositiveIntegerField(default=0)
     houses_area = models.PositiveIntegerField(default=0)
     total_area = models.PositiveIntegerField(default=0)
 
-    final_rating = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    final_rating = models.PositiveIntegerField(null=True, blank=True)
     total_amount_of_scores = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
 
     public_satisfaction_scores_sum = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
