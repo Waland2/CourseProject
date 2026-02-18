@@ -28,11 +28,11 @@ class MultipleFileField(forms.FileField):
 class AdminOpenDataImportForm(forms.Form):
     dataset_2 = MultipleFileField(
         label='Файлы первого типа',
-        help_text='Можно выбрать один или несколько JSON / JSONL файлов.',
+        help_text='Можно выбрать один или несколько файлов.',
     )
     dataset_3 = MultipleFileField(
         label='Файлы второго типа',
-        help_text='Можно выбрать один или несколько JSON / JSONL файлов.',
+        help_text='Можно выбрать один или несколько файлов.',
     )
     clear = forms.BooleanField(
         label='Очистить таблицы перед импортом',

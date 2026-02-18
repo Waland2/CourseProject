@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -62,7 +63,11 @@ def import_open_data(
             }
 
         bucket = merged[key]
-        bucket['full_name'] = bucket['full_name'] or row.get('NameOfManagingOrg', '')
+
+        raw_name = row.get('NameOfManagingOrg', '')
+        cleaned_name = clean_company_name(raw_name, inn=inn, year=year)
+        bucket['full_name'] = bucket['full_name'] or cleaned_name
+
         bucket['issued_prescriptions'] = to_int(row.get('IssuedPrescriptions')) or 0
         bucket['violations_amount'] = to_int(row.get('ViolationsAmount')) or 0
         bucket['protocols_composed'] = to_int(row.get('ProtocolsComposed')) or 0
@@ -89,8 +94,12 @@ def import_open_data(
             }
 
         bucket = merged[key]
-        bucket['full_name'] = row.get('Name') or bucket['full_name']
-        bucket['short_name'] = bucket['short_name'] or row.get('Name', '')
+
+        raw_name = row.get('Name') or ''
+        cleaned_name = clean_company_name(raw_name, inn=inn, year=year)
+
+        bucket['full_name'] = cleaned_name or bucket['full_name']
+        bucket['short_name'] = bucket['short_name'] or cleaned_name
 
         adm_areas = row.get('AdmArea') or []
         if isinstance(adm_areas, str):
@@ -130,11 +139,22 @@ def import_open_data(
 
     with transaction.atomic():
         for row in merged.values():
+            full_name = clean_company_name(
+                row.get('full_name') or row.get('short_name') or row['inn'],
+                inn=row['inn'],
+                year=row['year'],
+            )
+            short_name = clean_company_name(
+                row.get('short_name') or row.get('full_name') or row['inn'],
+                inn=row['inn'],
+                year=row['year'],
+            )
+
             company, company_created = ManagingCompany.objects.get_or_create(
                 inn=row['inn'],
                 defaults={
-                    'full_name': row.get('full_name') or row.get('short_name') or row['inn'],
-                    'short_name': row.get('short_name') or row.get('full_name') or row['inn'],
+                    'full_name': full_name,
+                    'short_name': short_name,
                 },
             )
 
@@ -143,12 +163,12 @@ def import_open_data(
             else:
                 updates = []
 
-                if row.get('full_name') and company.full_name != row['full_name']:
-                    company.full_name = row['full_name']
+                if full_name and company.full_name != full_name:
+                    company.full_name = full_name
                     updates.append('full_name')
 
-                if row.get('short_name') and company.short_name != row['short_name']:
-                    company.short_name = row['short_name']
+                if short_name and company.short_name != short_name:
+                    company.short_name = short_name
                     updates.append('short_name')
 
                 if updates:
@@ -234,6 +254,61 @@ def parse_json_content(content: str) -> list[dict[str, Any]]:
     return []
 
 
+def clean_company_name(value: Any, *, inn: str | None = None, year: int | None = None) -> str:
+    if value is None:
+        return ''
+
+    name = str(value).strip()
+    if not name:
+        return ''
+
+    name = re.sub(r'\s+', ' ', name).strip()
+    inn = clean_inn(inn) if inn is not None else ''
+    year_str = str(year) if year is not None else ''
+
+    while True:
+        old_name = name
+
+        if inn:
+            name = strip_trailing_token(name, inn)
+
+        if year_str:
+            name = strip_trailing_token(name, year_str)
+
+        name = name.strip(' ,;:-_')
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        if name == old_name:
+            break
+
+    return name
+
+
+def strip_trailing_token(text: str, token: str) -> str:
+    text = text.rstrip()
+    token = str(token).strip()
+    if not text or not token:
+        return text
+
+    separators = (
+        f' {token}',
+        f' ({token})',
+        f' [{token}]',
+        f' - {token}',
+        f' — {token}',
+        f', {token}',
+        f'; {token}',
+        f': {token}',
+        token,
+    )
+
+    for suffix in separators:
+        if text.endswith(suffix):
+            return text[: -len(suffix)].rstrip(' ,;:-_()[]')
+
+    return text
+
+
 def clean_inn(value: Any) -> str:
     if value is None:
         return ''
@@ -273,4 +348,4 @@ def first_nested(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
 
-    return {}   
+    return {}

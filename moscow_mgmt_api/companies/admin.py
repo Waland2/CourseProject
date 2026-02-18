@@ -66,16 +66,13 @@ class ManagingCompanyYearStatAdmin(admin.ModelAdmin):
                         request,
                         (
                             'Импорт завершён. '
-                            f'Создано компаний: {result.created_companies}, '
-                            f'обновлено компаний: {result.updated_companies}, '
-                            f'создано записей статистики: {result.created_stats}, '
-                            f'обновлено записей статистики: {result.updated_stats}, '
-                            f'обработано записей dataset-2: {result.processed_dataset_2_records}, '
-                            f'обработано записей dataset-3: {result.processed_dataset_3_records}, '
-                            f'объединено строк по ключу (INN, year): {result.merged_rows}.'
+                            f'Создано компаний: {result.created_companies}; '
+                            f'создано записей статистики: {result.created_stats}; '
+                            f'обработано записей первого типа: {result.processed_dataset_3_records}; '
+                            f'обработано записей второго типа: {result.processed_dataset_2_records}.'
                         ),
                         level=messages.SUCCESS,
-                    )
+                    )   
             else:
                 self.message_user(
                     request,
