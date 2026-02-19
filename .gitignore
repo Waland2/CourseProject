@@ -218,3 +218,5 @@ __marimo__/
 
 *.jsonl
 .env.example
+
+datasets/
