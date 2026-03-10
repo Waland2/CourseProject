@@ -1,0 +1,203 @@
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { companiesApi } from '../api/companiesApi';
+import { referenceApi } from '../api/referenceApi';
+import { CompanyCard } from '../components/CompanyCard';
+import { Loader } from '../components/Loader';
+import { ErrorState } from '../components/ErrorState';
+import { EmptyState } from '../components/EmptyState';
+import { Pagination } from '../components/Pagination';
+import { SectionHeader } from '../components/SectionHeader';
+import { cleanParams } from '../utils/queryParams';
+
+const PAGE_SIZE = 20;
+
+const sortCompaniesWithNullRatingLast = (items, ordering) => {
+  const list = Array.isArray(items) ? [...items] : [];
+
+  if (ordering !== 'final_rating' && ordering !== '-final_rating') {
+    return list;
+  }
+
+  return list.sort((a, b) => {
+    const aRating = a?.final_rating;
+    const bRating = b?.final_rating;
+
+    const aIsEmpty = aRating === null || aRating === undefined || aRating === '';
+    const bIsEmpty = bRating === null || bRating === undefined || bRating === '';
+
+    if (aIsEmpty && bIsEmpty) return 0;
+    if (aIsEmpty) return 1;
+    if (bIsEmpty) return -1;
+
+    const aNumber = Number(aRating);
+    const bNumber = Number(bRating);
+
+    if (ordering === '-final_rating') {
+      return bNumber - aNumber;
+    }
+
+    return aNumber - bNumber;
+  });
+};
+
+export function CatalogPage() {
+  const [searchParams] = useSearchParams();
+
+  const initialSearch = searchParams.get('search') || '';
+
+  const [searchDraft, setSearchDraft] = useState(initialSearch);
+  const [search, setSearch] = useState(initialSearch);
+  const [year, setYear] = useState(searchParams.get('year') || '');
+  const [admArea, setAdmArea] = useState(searchParams.get('adm_area') || '');
+  const [ordering, setOrdering] = useState(searchParams.get('ordering') || 'final_rating');
+  const [page, setPage] = useState(1);
+
+  const yearsQuery = useQuery({
+    queryKey: ['years'],
+    queryFn: referenceApi.getYears,
+  });
+
+  const areasQuery = useQuery({
+    queryKey: ['adm-areas'],
+    queryFn: referenceApi.getAdmAreas,
+  });
+
+  const companiesParams = useMemo(() => {
+    return cleanParams({
+      search,
+      year,
+      adm_area: admArea,
+      ordering,
+      page,
+      page_size: PAGE_SIZE,
+    });
+  }, [search, year, admArea, ordering, page]);
+
+  const companiesQuery = useQuery({
+    queryKey: ['companies', companiesParams],
+    queryFn: () => companiesApi.getCompanies(companiesParams),
+  });
+
+  const companiesData = companiesQuery.data || {};
+  const rawResults = Array.isArray(companiesData.results) ? companiesData.results : [];
+
+  const results = useMemo(() => {
+    return sortCompaniesWithNullRatingLast(rawResults, ordering);
+  }, [rawResults, ordering]);
+
+  const next = companiesData.next || null;
+  const previous = companiesData.previous || null;
+  const count = Number.isFinite(Number(companiesData.count)) ? Number(companiesData.count) : 0;
+  const totalPages = Math.max(Math.ceil(count / PAGE_SIZE), 1);
+
+  const handleApplySearch = () => {
+    setPage(1);
+    setSearch(searchDraft.trim());
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      handleApplySearch();
+    }
+  };
+
+  const handleYearChange = (value) => {
+    setPage(1);
+    setYear(value);
+  };
+
+  const handleAdmAreaChange = (value) => {
+    setPage(1);
+    setAdmArea(value);
+  };
+
+  const handleOrderingChange = (value) => {
+    setPage(1);
+    setOrdering(value);
+  };
+
+  if (companiesQuery.isLoading || yearsQuery.isLoading || areasQuery.isLoading) {
+    return <Loader />;
+  }
+
+  if (companiesQuery.isError || yearsQuery.isError || areasQuery.isError) {
+    return <ErrorState message="Не удалось загрузить каталог организаций." />;
+  }
+
+  return (
+    <div className="page-stack">
+      <SectionHeader
+        title="Каталог управляющих организаций"
+        description={`Найдено организаций: ${count}`}
+      />
+
+      <section className="filters-panel">
+        <div className="catalog-search-group">
+          <input
+            type="text"
+            placeholder="Поиск по названию или ИНН"
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
+            onKeyDown={handleSearchKeyDown}
+          />
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={handleApplySearch}
+          >
+            Найти
+          </button>
+        </div>
+
+        <select value={year} onChange={(event) => handleYearChange(event.target.value)}>
+          <option value="">Все годы</option>
+          {(yearsQuery.data || []).map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+
+        <select value={admArea} onChange={(event) => handleAdmAreaChange(event.target.value)}>
+          <option value="">Все округа</option>
+          {(areasQuery.data || []).map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+
+        <select value={ordering} onChange={(event) => handleOrderingChange(event.target.value)}>
+          <option value="final_rating">Место в рейтинге ↑</option>
+          <option value="-final_rating">Место в рейтинге ↓</option>
+          {/* <option value="-problem_index">Индекс проблемности ↓</option>
+          <option value="problem_index">Индекс проблемности ↑</option> */}
+          <option value="-houses_quantity">Количество домов ↓</option>
+          <option value="houses_quantity">Количество домов ↑</option>
+          <option value="name">Название А-Я</option>
+          <option value="-name">Название Я-А</option>
+        </select>
+      </section>
+
+      {results.length === 0 ? (
+        <EmptyState message="По выбранным фильтрам организации не найдены." />
+      ) : (
+        <section className="cards-grid">
+          {results.map((company) => (
+            <CompanyCard key={company.id} company={company} />
+          ))}
+        </section>
+      )}
+
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        hasNext={Boolean(next)}
+        hasPrevious={Boolean(previous)}
+        onChange={setPage}
+      />
+    </div>
+  );
+}
