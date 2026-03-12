@@ -17,6 +17,13 @@ const normalizeListResponse = (data) => {
     return data.items;
   }
 
+  if (Array.isArray(data?.similar_companies)) {
+    return data.similar_companies.map((item) => ({
+      ...item,
+      id: item.id ?? item.company_id,
+    }));
+  }
+
   return [];
 };
 

@@ -128,7 +128,7 @@ export function CompanyDetailsPage() {
               <p className="eyebrow">Место в рейтинге</p>
               <h2>{selectedYearData.final_rating ?? '—'}</h2>
               <p>Год анализа: {company.year ?? '—'}</p>
-              <p>Официальный рейтинг: {selectedYearData.official_rating ?? '—'}</p>
+              {/* <p>Официальный рейтинг: {selectedYearData.official_rating ?? '—'}</p> */}
             </div>
             <RiskBadge riskLevel={company.risk_level || insights?.risk_level} />
           </div>
@@ -148,10 +148,10 @@ export function CompanyDetailsPage() {
             title="Индекс проблемности"
             value={formatNumber(metrics.problem_index)}
           />
-          <StatCard
+          {/* <StatCard
             title="Индекс стабильности"
             value={formatNumber(company.stability_index)}
-          />
+          /> */}
         </div>
       </section>
 
@@ -202,7 +202,7 @@ export function CompanyDetailsPage() {
         </div>
       </section>
 
-      <section className="grid-2">
+      {/* <section className="grid-2">
         <div className="panel">
           <h3>Удовлетворённость жителей</h3>
           <div className="benchmark-list">
@@ -246,7 +246,7 @@ export function CompanyDetailsPage() {
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       <section className="panel">
         <h3>Нарушения и санкции</h3>

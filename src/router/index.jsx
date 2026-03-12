@@ -5,7 +5,6 @@ import { CatalogPage } from '../pages/CatalogPage';
 import { CompanyDetailsPage } from '../pages/CompanyDetailsPage';
 import { ComparisonPage } from '../pages/ComparisonPage';
 import { DistrictAnalyticsPage } from '../pages/DistrictAnalyticsPage';
-import { RankingsPage } from '../pages/RankingsPage';
 import { NotFoundPage } from '../pages/NotFoundPage';
 
 export const router = createBrowserRouter([
@@ -18,7 +17,6 @@ export const router = createBrowserRouter([
       { path: 'companies/:id', element: <CompanyDetailsPage /> },
       { path: 'comparison', element: <ComparisonPage /> },
       { path: 'districts', element: <DistrictAnalyticsPage /> },
-      { path: 'rankings', element: <RankingsPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

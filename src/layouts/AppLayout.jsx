@@ -2,11 +2,9 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { SearchInput } from '../components/SearchInput';
 
 const navItems = [
-  { to: '/', label: 'Главная' },
   { to: '/companies', label: 'Каталог УК' },
   { to: '/comparison', label: 'Сравнение' },
   { to: '/districts', label: 'Округа' },
-  { to: '/rankings', label: 'Рейтинги' },
 ];
 
 export function AppLayout() {
@@ -15,7 +13,7 @@ export function AppLayout() {
       <header className="app-header">
         <div className="container app-header__inner">
           <NavLink to="/" className="brand">
-            УК Аналитика
+            Тест  
           </NavLink>
           <nav className="main-nav">
             {navItems.map((item) => (
