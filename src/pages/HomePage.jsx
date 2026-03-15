@@ -1,7 +1,5 @@
+import { Navigate } from 'react-router-dom';
+
 export function HomePage() {
-  return (
-    <div className="page-stack">
-    
-    </div>
-  );
+  return <Navigate to="/companies" replace />;
 }

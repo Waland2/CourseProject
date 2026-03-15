@@ -12,9 +12,6 @@ export function AppLayout() {
     <div className="app-shell">
       <header className="app-header">
         <div className="container app-header__inner">
-          <NavLink to="/" className="brand">
-            Тест  
-          </NavLink>
           <nav className="main-nav">
             {navItems.map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? 'active' : '')}>

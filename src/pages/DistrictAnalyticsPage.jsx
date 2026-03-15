@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { analyticsApi } from '../api/analyticsApi';
 import { referenceApi } from '../api/referenceApi';
@@ -10,6 +10,31 @@ import { MetricBarChart } from '../components/MetricBarChart';
 import { formatNumber } from '../utils/formatters';
 import { Link } from 'react-router-dom';
 
+const getLatestYearValue = (years) => {
+  if (!Array.isArray(years) || years.length === 0) {
+    return '';
+  }
+
+  const normalizedYears = years
+    .map((item) => String(item))
+    .filter(Boolean);
+
+  if (!normalizedYears.length) {
+    return '';
+  }
+
+  return normalizedYears.reduce((latest, current) => {
+    const latestNumber = Number(latest);
+    const currentNumber = Number(current);
+
+    if (Number.isFinite(latestNumber) && Number.isFinite(currentNumber)) {
+      return currentNumber > latestNumber ? current : latest;
+    }
+
+    return current > latest ? current : latest;
+  });
+};
+
 export function DistrictAnalyticsPage() {
   const [year, setYear] = useState('');
 
@@ -18,9 +43,18 @@ export function DistrictAnalyticsPage() {
     queryFn: referenceApi.getYears,
   });
 
+  const latestYear = useMemo(() => getLatestYearValue(yearsQuery.data), [yearsQuery.data]);
+
+  useEffect(() => {
+    if (!year && latestYear) {
+      setYear(latestYear);
+    }
+  }, [year, latestYear]);
+
   const analyticsQuery = useQuery({
     queryKey: ['district-analytics', year],
     queryFn: () => analyticsApi.getDistrictAnalytics(year || undefined),
+    enabled: Boolean(year),
   });
 
   if (analyticsQuery.isLoading || yearsQuery.isLoading) {
@@ -57,7 +91,6 @@ export function DistrictAnalyticsPage() {
         description="Агрегированные показатели по административным округам."
         action={
           <select value={year} onChange={(event) => setYear(event.target.value)}>
-            <option value="">Последний доступный год</option>
             {(yearsQuery.data || []).map((item) => (
               <option key={item} value={item}>
                 {item}

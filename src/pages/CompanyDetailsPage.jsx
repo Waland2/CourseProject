@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { companiesApi } from '../api/companiesApi';
@@ -13,6 +13,31 @@ import { MetricLineChart } from '../components/MetricLineChart';
 import { MetricBarChart } from '../components/MetricBarChart';
 import { formatNumber } from '../utils/formatters';
 
+const getLatestYearValue = (years) => {
+  if (!Array.isArray(years) || years.length === 0) {
+    return '';
+  }
+
+  const normalizedYears = years
+    .map((item) => String(item))
+    .filter(Boolean);
+
+  if (!normalizedYears.length) {
+    return '';
+  }
+
+  return normalizedYears.reduce((latest, current) => {
+    const latestNumber = Number(latest);
+    const currentNumber = Number(current);
+
+    if (Number.isFinite(latestNumber) && Number.isFinite(currentNumber)) {
+      return currentNumber > latestNumber ? current : latest;
+    }
+
+    return current > latest ? current : latest;
+  });
+};
+
 export function CompanyDetailsPage() {
   const { id } = useParams();
   const [selectedYear, setSelectedYear] = useState('');
@@ -22,15 +47,25 @@ export function CompanyDetailsPage() {
     queryFn: referenceApi.getYears,
   });
 
+  const latestYear = useMemo(() => getLatestYearValue(yearsQuery.data), [yearsQuery.data]);
+
+  useEffect(() => {
+    if (!selectedYear && latestYear) {
+      setSelectedYear(latestYear);
+    }
+  }, [selectedYear, latestYear]);
+
   const [companyQuery, historyQuery, similarQuery, benchmarkQuery, insightsQuery] = useQueries({
     queries: [
       {
         queryKey: ['company', id, selectedYear],
         queryFn: () => companiesApi.getCompanyById(id, selectedYear || undefined),
+        enabled: Boolean(id && selectedYear),
       },
       {
         queryKey: ['company-history', id],
         queryFn: () => companiesApi.getCompanyHistory(id),
+        enabled: Boolean(id),
       },
       {
         queryKey: ['similar-companies', id, selectedYear],
@@ -39,14 +74,17 @@ export function CompanyDetailsPage() {
             year: selectedYear || undefined,
             limit: 5,
           }),
+        enabled: Boolean(id && selectedYear),
       },
       {
         queryKey: ['company-benchmark', id, selectedYear],
         queryFn: () => companiesApi.getBenchmark(id, selectedYear || undefined),
+        enabled: Boolean(id && selectedYear),
       },
       {
         queryKey: ['company-insights', id, selectedYear],
         queryFn: () => companiesApi.getInsights(id, selectedYear || undefined),
+        enabled: Boolean(id && selectedYear),
       },
     ],
   });
@@ -79,6 +117,7 @@ export function CompanyDetailsPage() {
   }, [history]);
 
   const isLoading =
+    yearsQuery.isLoading ||
     companyQuery.isLoading ||
     historyQuery.isLoading ||
     similarQuery.isLoading ||
@@ -86,6 +125,7 @@ export function CompanyDetailsPage() {
     insightsQuery.isLoading;
 
   const hasError =
+    yearsQuery.isError ||
     companyQuery.isError ||
     historyQuery.isError ||
     similarQuery.isError ||
@@ -111,7 +151,6 @@ export function CompanyDetailsPage() {
         description={`ИНН: ${company.inn} · ${company.adm_area}`}
         action={
           <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
-            <option value="">Последний доступный год</option>
             {(yearsQuery.data || []).map((year) => (
               <option key={year} value={year}>
                 {year}
@@ -127,7 +166,7 @@ export function CompanyDetailsPage() {
             <div>
               <p className="eyebrow">Место в рейтинге</p>
               <h2>{selectedYearData.final_rating ?? '—'}</h2>
-              <p>Год анализа: {company.year ?? '—'}</p>
+              <p>Год анализа: {company.year ?? selectedYear ?? '—'}</p>
               {/* <p>Официальный рейтинг: {selectedYearData.official_rating ?? '—'}</p> */}
             </div>
             <RiskBadge riskLevel={company.risk_level || insights?.risk_level} />
@@ -349,8 +388,7 @@ export function CompanyDetailsPage() {
                   <strong>{item.short_name || item.name}</strong>
                   <span>{item.adm_area}</span>
                   <small>
-                    Место в рейтинге: {item.final_rating ?? '—'} · similarity:{' '}
-                    {formatNumber(item.similarity_score)}
+                    Место в рейтинге: {item.final_rating ?? '—'}
                   </small>
                 </Link>
               ))}

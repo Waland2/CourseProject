@@ -102,54 +102,59 @@ export function SimpleComparisonChart({
   const rowHeight = Math.max(48, maxLines * 18 + 20);
   const calculatedHeight = Math.max(240, data.length * rowHeight + 40);
   const finalHeight = height || calculatedHeight;
+  const minChartWidth = Math.max(560, yAxisWidth + 260);
 
   return (
     <div className="chart-card">
-      <ResponsiveContainer width="100%" height={finalHeight}>
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ top: 8, right: 80, left: 12, bottom: 8 }}
-          barCategoryGap={16}
-        >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            type="number"
-            axisLine={false}
-            tickLine={false}
-            fontSize={14}
-            tickFormatter={(value) => valueFormatter(Number(value))}
-          />
-          <YAxis
-            type="category"
-            dataKey={yKey}
-            width={yAxisWidth}
-            axisLine={false}
-            tickLine={false}
-            interval={0}
-            tick={<CustomYAxisTick maxLineLength={maxLineLength} />}
-          />
-          <Tooltip
-            formatter={(value) => [valueFormatter(Number(value)), 'Значение']}
-            cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
-          />
-          <Bar
-            dataKey={dataKey}
-            radius={[0, 6, 6, 0]}
-            maxBarSize={28}
-          >
-            <LabelList
-              dataKey={dataKey}
-              position="right"
-              formatter={(value) => valueFormatter(Number(value))}
-              style={{
-                fill: '#7a6b5d',
-                fontSize: 14,
-              }}
-            />
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <div style={{ width: '100%', minWidth: minChartWidth, height: finalHeight }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={data}
+              layout="vertical"
+              margin={{ top: 8, right: 80, left: 12, bottom: 8 }}
+              barCategoryGap={16}
+            >
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                type="number"
+                axisLine={false}
+                tickLine={false}
+                fontSize={14}
+                tickFormatter={(value) => valueFormatter(Number(value))}
+              />
+              <YAxis
+                type="category"
+                dataKey={yKey}
+                width={yAxisWidth}
+                axisLine={false}
+                tickLine={false}
+                interval={0}
+                tick={<CustomYAxisTick maxLineLength={maxLineLength} />}
+              />
+              <Tooltip
+                formatter={(value) => [valueFormatter(Number(value)), 'Значение']}
+                cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
+              />
+              <Bar
+                dataKey={dataKey}
+                radius={[0, 6, 6, 0]}
+                maxBarSize={28}
+              >
+                <LabelList
+                  dataKey={dataKey}
+                  position="right"
+                  formatter={(value) => valueFormatter(Number(value))}
+                  style={{
+                    fill: '#7a6b5d',
+                    fontSize: 14,
+                  }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
   );
 }

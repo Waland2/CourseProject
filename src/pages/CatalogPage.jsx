@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { companiesApi } from '../api/companiesApi';
@@ -42,14 +42,40 @@ const sortCompaniesWithNullRatingLast = (items, ordering) => {
   });
 };
 
+const getLatestYearValue = (years) => {
+  if (!Array.isArray(years) || years.length === 0) {
+    return '';
+  }
+
+  const normalizedYears = years
+    .map((item) => String(item))
+    .filter(Boolean);
+
+  if (!normalizedYears.length) {
+    return '';
+  }
+
+  return normalizedYears.reduce((latest, current) => {
+    const latestNumber = Number(latest);
+    const currentNumber = Number(current);
+
+    if (Number.isFinite(latestNumber) && Number.isFinite(currentNumber)) {
+      return currentNumber > latestNumber ? current : latest;
+    }
+
+    return current > latest ? current : latest;
+  });
+};
+
 export function CatalogPage() {
   const [searchParams] = useSearchParams();
 
   const initialSearch = searchParams.get('search') || '';
+  const initialYearFromParams = searchParams.get('year') || '';
 
   const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [search, setSearch] = useState(initialSearch);
-  const [year, setYear] = useState(searchParams.get('year') || '');
+  const [year, setYear] = useState(initialYearFromParams);
   const [admArea, setAdmArea] = useState(searchParams.get('adm_area') || '');
   const [ordering, setOrdering] = useState(searchParams.get('ordering') || 'final_rating');
   const [page, setPage] = useState(1);
@@ -63,6 +89,14 @@ export function CatalogPage() {
     queryKey: ['adm-areas'],
     queryFn: referenceApi.getAdmAreas,
   });
+
+  const latestYear = useMemo(() => getLatestYearValue(yearsQuery.data), [yearsQuery.data]);
+
+  useEffect(() => {
+    if (!year && latestYear) {
+      setYear(latestYear);
+    }
+  }, [year, latestYear]);
 
   const companiesParams = useMemo(() => {
     return cleanParams({
@@ -78,6 +112,7 @@ export function CatalogPage() {
   const companiesQuery = useQuery({
     queryKey: ['companies', companiesParams],
     queryFn: () => companiesApi.getCompanies(companiesParams),
+    enabled: Boolean(year),
   });
 
   const companiesData = companiesQuery.data || {};
@@ -152,7 +187,6 @@ export function CatalogPage() {
         </div>
 
         <select value={year} onChange={(event) => handleYearChange(event.target.value)}>
-          <option value="">Все годы</option>
           {(yearsQuery.data || []).map((item) => (
             <option key={item} value={item}>
               {item}
