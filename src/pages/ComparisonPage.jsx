@@ -42,7 +42,7 @@ const COMPARISON_METRICS = [
   {
     value: 'houses_quantity',
     label: 'Количество домов',
-    description: 'Показывает масштаб управления. Это не оценка качества.',
+    description: 'Показывает масштаб.',
     reverse: true,
     formatter: (value) => formatNumber(value, 0),
   },

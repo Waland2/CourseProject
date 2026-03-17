@@ -12,6 +12,7 @@ import { SectionHeader } from '../components/SectionHeader';
 import { cleanParams } from '../utils/queryParams';
 
 const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 350;
 
 const sortCompaniesWithNullRatingLast = (items, ordering) => {
   const list = Array.isArray(items) ? [...items] : [];
@@ -98,6 +99,21 @@ export function CatalogPage() {
     }
   }, [year, latestYear]);
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      const normalizedValue = searchDraft.trim();
+
+      setPage((currentPage) => (currentPage === 1 ? currentPage : 1));
+      setSearch((currentSearch) => (
+        currentSearch === normalizedValue ? currentSearch : normalizedValue
+      ));
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [searchDraft]);
+
   const companiesParams = useMemo(() => {
     return cleanParams({
       search,
@@ -126,17 +142,6 @@ export function CatalogPage() {
   const previous = companiesData.previous || null;
   const count = Number.isFinite(Number(companiesData.count)) ? Number(companiesData.count) : 0;
   const totalPages = Math.max(Math.ceil(count / PAGE_SIZE), 1);
-
-  const handleApplySearch = () => {
-    setPage(1);
-    setSearch(searchDraft.trim());
-  };
-
-  const handleSearchKeyDown = (event) => {
-    if (event.key === 'Enter') {
-      handleApplySearch();
-    }
-  };
 
   const handleYearChange = (value) => {
     setPage(1);
@@ -175,15 +180,7 @@ export function CatalogPage() {
             placeholder="Поиск по названию или ИНН"
             value={searchDraft}
             onChange={(event) => setSearchDraft(event.target.value)}
-            onKeyDown={handleSearchKeyDown}
           />
-          <button
-            type="button"
-            className="button button--primary"
-            onClick={handleApplySearch}
-          >
-            Найти
-          </button>
         </div>
 
         <select value={year} onChange={(event) => handleYearChange(event.target.value)}>

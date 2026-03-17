@@ -161,7 +161,6 @@ export function DistrictAnalyticsPage() {
                   <tr>
                     <th>Округ</th>
                     <th>Количество УК</th>
-                    <th>Среднее место в рейтинге</th>
                     <th>Средний индекс проблемности</th>
                     <th>Нарушения/дом</th>
                     <th>Штрафы/1000 м²</th>
@@ -173,7 +172,6 @@ export function DistrictAnalyticsPage() {
                     <tr key={item.adm_area}>
                       <td>{item.adm_area}</td>
                       <td>{formatNumber(item.companies_count, 0)}</td>
-                      <td>{formatNumber(item.avg_final_rating)}</td>
                       <td>{formatNumber(item.avg_problem_index)}</td>
                       <td>{formatNumber(item.avg_violations_amount)}</td>
                       <td>{formatNumber(item.avg_fines_per_1000_m2)}</td>

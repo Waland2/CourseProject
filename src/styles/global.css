@@ -129,7 +129,7 @@ canvas {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
   min-width: 0;
 }
@@ -837,4 +837,10 @@ th {
   .button {
     min-height: 42px;
   }
+}
+
+.year-select {
+  min-width: 96px;
+  width: auto;
+  max-width: 100%;
 }

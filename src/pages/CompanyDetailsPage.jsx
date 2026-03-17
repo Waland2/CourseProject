@@ -150,7 +150,11 @@ export function CompanyDetailsPage() {
         title={company.short_name || company.full_name || company.name}
         description={`ИНН: ${company.inn} · ${company.adm_area}`}
         action={
-          <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
+          <select
+            className="year-select"
+            value={selectedYear}
+            onChange={(event) => setSelectedYear(event.target.value)}
+          >
             {(yearsQuery.data || []).map((year) => (
               <option key={year} value={year}>
                 {year}
@@ -166,7 +170,7 @@ export function CompanyDetailsPage() {
             <div>
               <p className="eyebrow">Место в рейтинге</p>
               <h2>{selectedYearData.final_rating ?? '—'}</h2>
-              <p>Год анализа: {company.year ?? selectedYear ?? '—'}</p>
+              {/* <p>Год анализа: {company.year ?? selectedYear ?? '—'}</p> */}
               {/* <p>Официальный рейтинг: {selectedYearData.official_rating ?? '—'}</p> */}
             </div>
             <RiskBadge riskLevel={company.risk_level || insights?.risk_level} />
