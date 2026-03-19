@@ -129,6 +129,7 @@ export function CatalogPage() {
     queryKey: ['companies', companiesParams],
     queryFn: () => companiesApi.getCompanies(companiesParams),
     enabled: Boolean(year),
+    placeholderData: (previousData) => previousData,
   });
 
   const companiesData = companiesQuery.data || {};
@@ -158,7 +159,12 @@ export function CatalogPage() {
     setOrdering(value);
   };
 
-  if (companiesQuery.isLoading || yearsQuery.isLoading || areasQuery.isLoading) {
+  const isInitialLoading =
+    yearsQuery.isLoading ||
+    areasQuery.isLoading ||
+    (companiesQuery.isLoading && !companiesQuery.data);
+
+  if (isInitialLoading) {
     return <Loader />;
   }
 
@@ -203,14 +209,14 @@ export function CatalogPage() {
         <select value={ordering} onChange={(event) => handleOrderingChange(event.target.value)}>
           <option value="final_rating">Место в рейтинге ↑</option>
           <option value="-final_rating">Место в рейтинге ↓</option>
-          {/* <option value="-problem_index">Индекс проблемности ↓</option>
-          <option value="problem_index">Индекс проблемности ↑</option> */}
           <option value="-houses_quantity">Количество домов ↓</option>
           <option value="houses_quantity">Количество домов ↑</option>
           <option value="name">Название А-Я</option>
           <option value="-name">Название Я-А</option>
         </select>
       </section>
+
+      {companiesQuery.isFetching ? <Loader label="Обновляем список..." /> : null}
 
       {results.length === 0 ? (
         <EmptyState message="По выбранным фильтрам организации не найдены." />

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -7,7 +8,25 @@ import {
   YAxis,
   Tooltip,
   LabelList,
+  Legend,
 } from 'recharts';
+
+const DEFAULT_BAR_COLORS = ['#2563eb', '#d97706', '#16a34a', '#9333ea', '#dc2626'];
+
+function useViewportWidth() {
+  const getWidth = () =>
+    typeof window !== 'undefined' ? window.innerWidth : 1280;
+
+  const [width, setWidth] = useState(getWidth);
+
+  useEffect(() => {
+    const onResize = () => setWidth(getWidth());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  return width;
+}
 
 function wrapLabel(text, maxLineLength = 18) {
   if (!text) return [''];
@@ -45,42 +64,46 @@ function getMaxLines(data, xKey, maxLineLength) {
   }, 1);
 }
 
-function getYAxisWidth(data, xKey) {
-  if (!Array.isArray(data) || data.length === 0) return 140;
+function getYAxisWidth(data, xKey, viewportWidth) {
+  if (!Array.isArray(data) || data.length === 0) {
+    if (viewportWidth <= 560) return 92;
+    if (viewportWidth <= 768) return 120;
+    return 140;
+  }
 
   const longest = data.reduce((max, item) => {
     const len = String(item?.[xKey] ?? '').length;
     return Math.max(max, len);
   }, 0);
 
-  if (longest > 40) return 240;
-  if (longest > 32) return 220;
-  if (longest > 26) return 200;
-  if (longest > 20) return 180;
+  if (viewportWidth <= 560) return 92;
+  if (viewportWidth <= 768) return 120;
 
-  return 150;
+  if (longest > 40) return 220;
+  if (longest > 32) return 200;
+  if (longest > 26) return 180;
+  if (longest > 20) return 160;
+
+  return 140;
 }
 
 function CustomYAxisTick(props) {
-  const { x, y, payload, maxLineLength = 18 } = props;
+  const {
+    x,
+    y,
+    payload,
+    maxLineLength = 18,
+    fontSize = 14,
+    lineHeight = 16,
+  } = props;
+
   const lines = wrapLabel(payload.value, maxLineLength);
 
   return (
     <g transform={`translate(${x},${y})`}>
-      <text
-        x={0}
-        y={0}
-        textAnchor="end"
-        fill="#5b6475"
-        fontSize={14}
-        dy={4}
-      >
+      <text x={0} y={0} textAnchor="end" fill="#5b6475" fontSize={fontSize} dy={4}>
         {lines.map((line, index) => (
-          <tspan
-            key={`${line}-${index}`}
-            x={0}
-            dy={index === 0 ? 0 : 16}
-          >
+          <tspan key={`${line}-${index}`} x={0} dy={index === 0 ? 0 : lineHeight}>
             {line}
           </tspan>
         ))}
@@ -97,22 +120,25 @@ export function MetricBarChart({
   height,
   valueFormatter = (value) => String(value),
 }) {
+  const viewportWidth = useViewportWidth();
   const isHorizontal = layout === 'horizontal';
+  const isMobile = viewportWidth <= 560;
+  const isTablet = viewportWidth <= 768;
 
-  const maxLineLength = 18;
+  const maxLineLength = isMobile ? 12 : 18;
   const maxLines = getMaxLines(data, xKey, maxLineLength);
-  const yAxisWidth = getYAxisWidth(data, xKey);
+  const yAxisWidth = getYAxisWidth(data, xKey, viewportWidth);
 
-  const rowHeight = Math.max(42, maxLines * 18 + 18);
-  const calculatedHeight = Math.max(360, data.length * rowHeight + 40);
+  const rowHeight = Math.max(isMobile ? 34 : 42, maxLines * (isMobile ? 14 : 18) + 14);
+  const calculatedHeight = Math.max(isMobile ? 280 : 360, data.length * rowHeight + 32);
   const finalHeight = height || calculatedHeight;
 
   const minChartWidth = isHorizontal
-    ? Math.max(520, yAxisWidth + 260)
-    : Math.max(520, data.length * 72);
+    ? '100%'
+    : Math.max(isMobile ? 360 : 520, data.length * (isMobile ? 56 : 72));
 
   return (
-    <div style={{ width: '100%', overflowX: 'auto' }}>
+    <div style={{ width: '100%', overflowX: isHorizontal ? 'hidden' : 'auto' }}>
       <div style={{ width: '100%', minWidth: minChartWidth, height: finalHeight }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -120,11 +146,11 @@ export function MetricBarChart({
             layout={isHorizontal ? 'vertical' : 'horizontal'}
             margin={{
               top: 8,
-              right: 44,
-              left: isHorizontal ? 12 : 8,
+              right: isMobile ? 16 : isTablet ? 24 : 44,
+              left: isHorizontal ? (isMobile ? 4 : 12) : 8,
               bottom: isHorizontal ? 8 : 24,
             }}
-            barCategoryGap={12}
+            barCategoryGap={isMobile ? 8 : 12}
           >
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
 
@@ -135,7 +161,7 @@ export function MetricBarChart({
                   tickFormatter={(value) => valueFormatter(Number(value))}
                   axisLine={false}
                   tickLine={false}
-                  fontSize={14}
+                  fontSize={isMobile ? 12 : 14}
                 />
                 <YAxis
                   type="category"
@@ -144,7 +170,13 @@ export function MetricBarChart({
                   axisLine={false}
                   tickLine={false}
                   interval={0}
-                  tick={<CustomYAxisTick maxLineLength={maxLineLength} />}
+                  tick={
+                    <CustomYAxisTick
+                      maxLineLength={maxLineLength}
+                      fontSize={isMobile ? 12 : 14}
+                      lineHeight={isMobile ? 14 : 16}
+                    />
+                  }
                 />
               </>
             ) : (
@@ -154,43 +186,35 @@ export function MetricBarChart({
                   dataKey={xKey}
                   axisLine={false}
                   tickLine={false}
-                  fontSize={14}
+                  fontSize={isMobile ? 12 : 14}
                 />
                 <YAxis
                   type="number"
                   tickFormatter={(value) => valueFormatter(Number(value))}
                   axisLine={false}
                   tickLine={false}
-                  fontSize={14}
+                  fontSize={isMobile ? 12 : 14}
                 />
               </>
             )}
 
             <Tooltip
-              formatter={(value, name) => [
-                valueFormatter(Number(value)),
-                name,
-              ]}
+              formatter={(value, name) => [valueFormatter(Number(value)), name]}
               cursor={{ fill: 'rgba(0, 0, 0, 0.04)' }}
             />
 
-            {bars.map((bar) => (
+            <Legend />
+
+            {bars.map((bar, index) => (
               <Bar
                 key={bar.dataKey}
                 dataKey={bar.dataKey}
                 name={bar.name}
+                fill={bar.color || DEFAULT_BAR_COLORS[index % DEFAULT_BAR_COLORS.length]}
                 radius={isHorizontal ? [0, 6, 6, 0] : [6, 6, 0, 0]}
-                maxBarSize={28}
+                maxBarSize={isMobile ? 22 : 28}
               >
-                <LabelList
-                  dataKey={bar.dataKey}
-                  position={isHorizontal ? 'right' : 'top'}
-                  formatter={(value) => valueFormatter(Number(value))}
-                  style={{
-                    fill: '#7a6b5d',
-                    fontSize: 14,
-                  }}
-                />
+
               </Bar>
             ))}
           </BarChart>

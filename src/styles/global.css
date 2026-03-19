@@ -844,3 +844,17 @@ th {
   width: auto;
   max-width: 100%;
 }
+
+.chart-card {
+  overflow: hidden;
+}
+
+.recharts-surface {
+  overflow: visible;
+}
+
+@media (max-width: 560px) {
+  .chart-card {
+    padding: 10px;
+  }
+}
