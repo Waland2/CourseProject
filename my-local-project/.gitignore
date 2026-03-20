@@ -1,0 +1,33 @@
+# Dependencies
+node_modules
+/build
+/dist
+.env.local
+.cache
+.parcel-cache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store
+
+# Testing
+/coverage
+
+# TypeScript
+.tsbuildinfo
+
+# IDE specific files
+.idea
+.vscode
+*.suo
+*.user
+*.casc
+*.ntvs
+*.njsproj
+*.tmplproj
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.Identifier
