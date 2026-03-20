@@ -8,7 +8,6 @@ from rest_framework.views import APIView
 from companies.models import ManagingCompanyYearStat
 from companies.services import compute_metrics, get_service_rank, resolve_year
 
-
 class DistrictAnalyticsView(APIView):
     def get(self, request):
         requested_year = request.query_params.get('year')
@@ -23,6 +22,13 @@ class DistrictAnalyticsView(APIView):
         for adm_area, items in sorted(groups.items(), key=lambda entry: entry[0]):
             avg_problem_index = round(sum(compute_metrics(item).problem_index for item in items) / len(items), 2)
             avg_fines_per_1000_m2 = round(sum(compute_metrics(item).fines_per_1000_m2 for item in items) / len(items), 2)
+
+            total_houses = sum(item.houses_quantity or 0 for item in items)
+            avg_violations_amount = round(
+                sum(item.violations_amount for item in items) / total_houses,
+                4,
+            ) if total_houses else 0.0
+
             result.append(
                 {
                     'adm_area': adm_area,
@@ -32,7 +38,7 @@ class DistrictAnalyticsView(APIView):
                         2
                     ),
                     'avg_total_amount_of_scores': round(sum(float(item.total_amount_of_scores or 0) for item in items) / len(items), 2),
-                    'avg_violations_amount': round(sum(item.violations_amount for item in items) / len(items), 2),
+                    'avg_violations_amount': avg_violations_amount,
                     'avg_sum_of_fine': round(sum(float(item.sum_of_fine) for item in items) / len(items), 2),
                     'avg_problem_index': avg_problem_index,
                     'avg_fines_per_1000_m2': avg_fines_per_1000_m2,
